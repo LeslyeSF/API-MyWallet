@@ -4,6 +4,7 @@ import { MongoClient } from "mongodb";
 import dotenv from "dotenv";
 import Joi from "joi";
 import bcrypt from 'bcrypt';
+import { v4 as uuid } from 'uuid';
 
 const server = express();
 server.use(cors());
@@ -19,28 +20,37 @@ mongoClient.connect(()=>{
 const userSchema = Joi.object({
   name: Joi.string().required(),
   email: Joi.string().email().required(),
+  password: Joi.string().required(),
+  records: Joi.required()
+});
+const loginSchema = Joi.object({
+  email: Joi.string().email().required(),
   password: Joi.string().required()
 });
 
 server.post("/register", async (req,res)=>{
-  const user = req.body;
+  const user = {
+    ...req.body,
+    records:[]
+  };
   const validation = userSchema.validate(user, { abortEarly: true });
 
   if (validation.error) {
     console.log(validation.error.details);
     res.sendStatus(422);
+    return;
   }
 
   try{
     const userverify = await db.collection("Users").findOne({email: user.email});
     if(userverify){
       res.status(409).send("Já existe uma conta com este email!");
+      return;
     }
     const cryptPassword = bcrypt.hashSync(user.password, 10);
     user.password = cryptPassword;
     await db.collection("Users").insertOne(user);
     res.sendStatus(201);
-    //console.log(bcrypt.compareSync(user.password, cryptPassword));
   } catch(err){
     res.status(500).send(err);
   }
@@ -52,14 +62,51 @@ server.post("/register", async (req,res)=>{
 });
 
 server.post("/login", async(req,res)=>{
-  //recebe email e senha 
-  //validar os dados com joi
-  //buscar no sistema o email
-  //verificar se a senha e compativel
-  //criar o token
-  //salvar o token+iduser em outra colecao SESSIONS
-  //responder com status 200 e o token
+  const login = req.body;
+  const validation = loginSchema.validate(login, { abortEarly: true });
+
+  if (validation.error) {
+    console.log(validation.error.details);
+    res.sendStatus(422);
+    return;
+  }
+
+  try{
+    const user = await db.collection("Users").findOne({email: login.email});
+    if(!user){
+      res.status(404).send("email errado");
+      return;
+    }
+    const userVerify = bcrypt.compareSync(login.password, user.password);
+    if(!userVerify){
+      res.status(404).send("senha errada");
+      return;
+    } 
+    const sessionVerify = await db.collection("Sessions").findOne({idUser: user._id});
+    if(sessionVerify){
+      res.status(200).send(sessionVerify.token);
+      return;
+    }
+    const token = uuid();
+    await db.collection("Sessions").insertOne({
+      idUser: user._id,
+      token: token
+    });
+    res.status(200).send(token);
+
+  }catch(err){
+    res.status(500).send(err);
+  }
+  //recebe email e senha                            v
+  //validar os dados com joi                        v 
+  //buscar no sistema o email                       v
+  //verificar se a senha e compativel               v
+  //criar o token                                   v
+  //salvar o token+iduser em outra colecao SESSIONS v
+  //responder com status 200 e o token              v
+  //Verificar se ja existe uma sessao com o usuario v
 });
+
 server.get("/dates", async(req,res)=>{
   //receber token
   //verificar se existe alguma sessao com esse token
